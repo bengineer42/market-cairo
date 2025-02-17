@@ -1,0 +1,30 @@
+[package]
+cairo-version = "=2.9.2"
+name = "market"
+version = "0.1.0"
+experimental-features = ["negative_impls"]
+
+[cairo]
+sierra-replace-ids = true
+
+[tool.fmt]
+sort-module-level-items = true
+
+[dependencies]
+starknet = "2.9.2"
+dojo = { git = "https://github.com/dojoengine/dojo", tag = "v1.1.2" }
+openzeppelin_access = { git = "https://github.com/OpenZeppelin/cairo-contracts", tag = "v0.20.0" }
+openzeppelin_introspection = { git = "https://github.com/OpenZeppelin/cairo-contracts", tag = "v0.20.0" }
+openzeppelin_token = { git = "https://github.com/OpenZeppelin/cairo-contracts", tag = "v0.20.0" }
+
+
+[[target.starknet-contract]]
+sierra = true
+casm = true
+build-external-contracts = ["dojo::world::world_contract::world"]
+
+
+[profile.sepolia]
+
+[features]
+default = []
