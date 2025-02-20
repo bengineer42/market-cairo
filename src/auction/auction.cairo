@@ -6,6 +6,7 @@ trait IAuction<TState> {
     fn bid(ref self: TState, amount: u256);
     fn complete(ref self: TState);
     fn rescind(ref self: TState);
+    fn erc20_address(self: @TState) -> ContractAddress;
     fn highest_bid(self: @TState) -> u256;
     fn highest_bidder(self: @TState) -> ContractAddress;
     fn lot(self: @TState) -> Array<Token>;
@@ -13,24 +14,30 @@ trait IAuction<TState> {
     fn reserve(self: @TState) -> u256;
     fn expiry(self: @TState) -> u64;
     fn tax_ppm(self: @TState) -> u32;
+    fn beneficiary(self: @TState) -> ContractAddress;
     fn open(self: @TState) -> bool;
+    fn verify_lot_ownership(self: @TState) -> bool;
 }
 
 #[starknet::contract]
 mod auction {
     use starknet::{ContractAddress, get_caller_address, get_contract_address, get_block_timestamp};
+
     use openzeppelin_token::erc20::{ERC20ABIDispatcher, ERC20ABIDispatcherTrait};
-    use market::{token::{Token, TokenTrait, read_goods, write_goods}, utils::calc_tax};
+
+    use market::token::{Token, TokenTrait, StoreGoodsTrait};
+    use market::tax::calc_tax;
 
     use super::IAuction;
 
+    const GOODS_ADDRESS: felt252 = selector!("offer");
+
     #[storage]
     struct Storage {
-        emitter: ContractAddress,
+        manager: ContractAddress,
         tax_ppm: u32,
-        house: ContractAddress,
+        beneficiary: ContractAddress,
         seller: ContractAddress,
-        lot_len: u32,
         expiry: u64,
         erc20_address: ContractAddress,
         reserve: u256,
@@ -43,8 +50,7 @@ mod auction {
     #[constructor]
     fn constructor(
         ref self: ContractState,
-        emitter: ContractAddress,
-        house: ContractAddress,
+        beneficiary: ContractAddress,
         tax_ppm: u32,
         seller: ContractAddress,
         lot: Array<Token>,
@@ -52,16 +58,13 @@ mod auction {
         reserve: u256,
         increment: u256,
     ) {
-        self.emitter.write(emitter);
-        self.house.write(house);
+        self.manager.write(get_contract_address());
+        self.beneficiary.write(beneficiary);
         self.tax_ppm.write(tax_ppm);
         self.seller.write(seller);
-
         self.expiry.write(expiry);
         self.reserve.write(reserve);
         self.increment.write(increment);
-        self.lot_len.write(lot.len());
-        write_goods(lot);
     }
 
     #[generate_trait]
@@ -80,7 +83,7 @@ mod auction {
         }
 
         fn transfer_lot(ref self: ContractState, to: ContractAddress) {
-            read_goods(self.lot_len.read()).transfer(to);
+            self.lot().transfer(to);
             self.closed.write(true);
         }
     }
@@ -121,7 +124,7 @@ mod auction {
 
             let dispatcher = self.get_erc20_dispatcher();
 
-            let tax = calc_tax(bid, self.tax_ppm.read());
+            let tax = split_tax(bid, self.tax_ppm.read());
 
             dispatcher.transfer(seller, bid - tax);
             dispatcher.transfer(self.emitter.read(), tax);
@@ -148,7 +151,7 @@ mod auction {
         }
 
         fn lot(self: @ContractState) -> Array<Token> {
-            read_goods(self.lot_len.read())
+            StoreGoodsTrait::<Array<Token>>::read_goods(GOODS_ADDRESS)
         }
 
         fn increment(self: @ContractState) -> u256 {
@@ -169,6 +172,10 @@ mod auction {
 
         fn open(self: @ContractState) -> bool {
             !self.closed.read()
+        }
+
+        fn verify_lot_ownership(self: @ContractState) -> bool {
+            self.lot().is_owned(get_contract_address())
         }
     }
 }

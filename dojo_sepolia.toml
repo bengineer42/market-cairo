@@ -1,0 +1,27 @@
+[world]
+name = "market"
+seed = "market-0.1.0"
+description = "Marketplace for ERC20 and ERC721 tokens"
+
+[env]
+rpc_url = "https://api.cartridge.gg/x/starknet/sepolia"
+account_address = "0x058e3B49d870f08C96a02f794C82b5f6C868c074DeaDD6bA04E8d2194723B5bd"
+
+[namespace]
+default = "market"
+mappings = { "direct" = [
+    "direct_manager",
+    "NewDirect",
+    "DirectExpiry",
+    "DirectOffer",
+    "DirectPaused",
+    "DirectClosed",
+    "DirectBought",
+    "DirectSingleTokenAddress",
+    "DirectSinglePrice",
+    "DirectMultipleAsk",
+    "DirectOneOfPrice",
+] }
+
+[writers]
+"direct" = "direct-direct_manager"

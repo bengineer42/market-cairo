@@ -10,7 +10,7 @@ mod token {
 }
 
 mod storage;
-mod utils;
+mod starknet;
 mod auction {
     mod auction;
     mod utils;
@@ -22,12 +22,21 @@ mod auction {
     };
 }
 mod direct {
+    mod components;
     mod interfaces;
     mod single;
     mod multiple;
     mod one_of;
     mod manager;
+    mod events;
+
+    pub use components::{DirectType, DirectTypeTrait, errors};
+    pub use single::deploy_direct_single;
+    pub use multiple::deploy_direct_multiple;
+    pub use one_of::deploy_direct_one_of;
+    pub use events::DirectEvents;
 }
 
 mod hash;
 mod dojo;
+mod tax;

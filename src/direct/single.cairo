@@ -1,9 +1,35 @@
+use starknet::{ContractAddress, ClassHash};
+use market::{starknet::deploy_with_single_return, token::Token};
 use super::interfaces;
+
+pub fn deploy_direct_single(
+    class_hash: ClassHash,
+    salt: felt252,
+    seller: ContractAddress,
+    offer: Span<Token>,
+    expiry: u64,
+    beneficiary: ContractAddress,
+    tax_ppm: u32,
+    erc20_address: ContractAddress,
+    price: u256,
+) -> (ContractAddress, felt252) {
+    let mut calldata: Array<felt252> = array![seller.into()];
+    Serde::serialize(@offer, ref calldata);
+    calldata
+        .append_span(
+            [
+                expiry.into(), beneficiary.into(), tax_ppm.into(), erc20_address.into(),
+                price.low.into(), price.high.into(),
+            ]
+                .span(),
+        );
+    deploy_with_single_return(class_hash, salt, calldata.span())
+}
 
 #[starknet::contract]
 mod direct_single {
     use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
-    use market::token::{Token, erc20_transfer_from};
+    use market::token::Token;
     use super::interfaces::{direct_component, IDirectSingle};
     use direct_component::DirectCoreTrait;
     component!(path: direct_component, storage: core, event: DirectEvent);
@@ -26,14 +52,16 @@ mod direct_single {
     fn constructor(
         ref self: ContractState,
         seller: ContractAddress,
-        erc20_address: ContractAddress,
-        price: u256,
         offer: Array<Token>,
         expiry: u64,
-    ) {
-        self.core.initializer(seller, offer, expiry);
+        beneficiary: ContractAddress,
+        tax_ppm: u32,
+        erc20_address: ContractAddress,
+        price: u256,
+    ) -> felt252 {
         self.erc20_address.write(erc20_address);
         self.price.write(price);
+        self.core.initializer(seller, offer, expiry, beneficiary, tax_ppm)
     }
 
     #[abi(embed_v0)]
@@ -45,9 +73,9 @@ mod direct_single {
             assert(price == self.price.read(), 'Price does not match');
 
             let caller = get_caller_address();
-            erc20_transfer_from(self.erc20_address.read(), caller, self.core.seller(), price);
-
-            self.core.assert_hash_and_transfer_goods(caller, offer_hash);
+            self
+                .core
+                .assert_hash_and_transfer(caller, offer_hash, (self.erc20_address.read(), price));
         }
 
         fn set_price(ref self: ContractState, price: u256) {

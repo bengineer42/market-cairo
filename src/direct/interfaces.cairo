@@ -9,15 +9,21 @@ trait IDirectManager<TContractState> {
         erc20_address: ContractAddress,
         price: u256,
         expiry: u64,
+        tax_ppm: u32,
     );
     fn new_multiple(
-        ref self: TContractState, offer: Array<Token>, ask: Array<ERC20Amount>, expiry: u64,
+        ref self: TContractState,
+        offer: Array<Token>,
+        ask: Array<ERC20Amount>,
+        expiry: u64,
+        tax_ppm: u32,
     );
     fn new_one_of(
         ref self: TContractState,
         offer: Array<Token>,
         prices: Array<(ContractAddress, u256)>,
         expiry: u64,
+        tax_ppm: u32,
     );
 
     fn set_single_class_hash(ref self: TContractState, class_hash: ClassHash);
@@ -28,18 +34,26 @@ trait IDirectManager<TContractState> {
     fn get_multiple_class_hash(self: @TContractState) -> ClassHash;
     fn get_one_of_class_hash(self: @TContractState) -> ClassHash;
 
-    fn emit_transfer(ref self: TContractState, to: ContractAddress);
-    fn emit_close(ref self: TContractState);
-    fn emit_new_expiry(ref self: TContractState, expiry: u64);
-    fn emit_new_offer(ref self: TContractState, offer: Array<Token>, offer_hash: felt252);
+    fn set_bought(ref self: TContractState, buyer: ContractAddress);
+    fn set_paused(ref self: TContractState);
+    fn set_resumed(ref self: TContractState);
+    fn set_closed(ref self: TContractState);
+    fn set_new_expiry(ref self: TContractState, expiry: u64);
+    fn set_new_offer(ref self: TContractState, offer: Span<Token>, offer_hash: felt252);
 
-    fn emit_single_new_price(ref self: TContractState, price: u256);
-    fn emit_one_of_new_price(ref self: TContractState, erc20_address: ContractAddress, price: u256);
-    fn emit_one_of_remove_token(ref self: TContractState, erc20_address: ContractAddress);
-    fn emit_multiple_new_ask(ref self: TContractState, ask: Array<ERC20Amount>, ask_hash: felt252);
+    fn set_single_new_price(ref self: TContractState, price: u256);
+    fn set_one_of_new_price(ref self: TContractState, erc20_address: ContractAddress, price: u256);
+    fn set_one_of_remove_token(ref self: TContractState, erc20_address: ContractAddress);
+    fn set_multiple_new_ask(ref self: TContractState, ask: Span<ERC20Amount>, ask_hash: felt252);
 
-    fn tax(self: @TContractState) -> u32;
+    fn grant_owner(ref self: TContractState, contract_address: ContractAddress);
+    fn revoke_owner(ref self: TContractState, contract_address: ContractAddress);
+    fn is_owner(self: @TContractState, contract_address: ContractAddress) -> bool;
+
+    fn set_beneficiary(ref self: TContractState, beneficiary: ContractAddress);
     fn set_tax(ref self: TContractState, ppm: u32);
+    fn beneficiary(self: @TContractState) -> ContractAddress;
+    fn tax_ppm(self: @TContractState) -> u32;
 }
 
 #[starknet::interface]
@@ -86,6 +100,7 @@ trait IDirect<TContractState> {
     fn seller(self: @TContractState) -> ContractAddress;
     fn offer_hash(self: @TContractState) -> felt252;
     fn offer_and_hash(self: @TContractState) -> (Array<Token>, felt252);
+    fn verify_offer_ownership(self: @TContractState) -> bool;
 }
 
 #[starknet::component]
@@ -93,9 +108,9 @@ mod direct_component {
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
     use market::{
         token::{Token, TokenTrait, StoreGoodsTrait, models::TokenArrayHashImpl},
-        hash::HashValueTrait,
+        hash::HashValueTrait, tax::TransferAndTax,
     };
-    use super::IDirect;
+    use super::{IDirect, IDirectManagerDispatcher, IDirectManagerDispatcherTrait};
 
     const GOODS_ADDRESS: felt252 = selector!("offer");
 
@@ -106,6 +121,9 @@ mod direct_component {
         pub paused: bool,
         pub offer_hash: felt252,
         pub expiry: u64,
+        pub beneficiary: ContractAddress,
+        pub tax_ppm: u32,
+        pub manager: ContractAddress,
     }
 
     #[embeddable_as(DirectImpl)]
@@ -117,6 +135,7 @@ mod direct_component {
             self.assert_caller_is_seller();
             assert(!self.paused.read(), 'Already Paused');
             self.paused.write(true);
+            self.manager_dispatcher().set_paused();
         }
 
         fn resume(ref self: ComponentState<TContractState>) {
@@ -124,11 +143,13 @@ mod direct_component {
             self.assert_not_paused();
             self.assert_caller_is_seller();
             self.paused.write(false);
+            self.manager_dispatcher().set_resumed();
         }
 
         fn close(ref self: ComponentState<TContractState>) {
             self.assert_open();
             self.transfer_goods(self.assert_caller_is_seller());
+            self.manager_dispatcher().set_closed();
         }
 
         fn modify_offer(
@@ -144,8 +165,9 @@ mod direct_component {
             add.transfer_from(owner, this_address);
             remove.transfer(owner);
             let _new_offer = @new_offer;
-            self.set_offer(new_offer);
+            let offer_hash = self.set_offer(new_offer);
             assert(_new_offer.is_owned(this_address), 'New Offer Incorrect');
+            self.manager_dispatcher().set_new_offer(_new_offer.span(), offer_hash);
         }
 
         fn modify_expiry(ref self: ComponentState<TContractState>, expiry: u64) {
@@ -169,6 +191,9 @@ mod direct_component {
         fn offer_and_hash(self: @ComponentState<TContractState>) -> (Array<Token>, felt252) {
             (self.offer(), self.offer_hash())
         }
+        fn verify_offer_ownership(self: @ComponentState<TContractState>) -> bool {
+            self.offer().is_owned(get_contract_address())
+        }
     }
 
     #[generate_trait]
@@ -180,10 +205,15 @@ mod direct_component {
             seller: ContractAddress,
             offer: Array<Token>,
             expiry: u64,
-        ) {
+            beneficiary: ContractAddress,
+            tax_ppm: u32,
+        ) -> felt252 {
             self.seller.write(seller);
             self.expiry.write(expiry);
-            self.set_offer(offer);
+            self.beneficiary.write(beneficiary);
+            self.tax_ppm.write(tax_ppm);
+            self.manager.write(get_caller_address());
+            self.set_offer(offer)
         }
 
         fn transfer_goods(ref self: ComponentState<TContractState>, to: ContractAddress) {
@@ -213,17 +243,19 @@ mod direct_component {
             self.expiry.read() > get_block_timestamp()
         }
 
-        fn set_offer(ref self: ComponentState<TContractState>, offer: Array<Token>) {
-            self.offer_hash.write(offer.hash_value());
+        fn set_offer(ref self: ComponentState<TContractState>, offer: Array<Token>) -> felt252 {
+            let offer_hash = offer.hash_value();
+            self.offer_hash.write(offer_hash);
             offer.write_goods(GOODS_ADDRESS);
+            offer_hash
         }
 
-        fn check_offer_hash(self: @ComponentState<TContractState>, hash: felt252) -> bool {
-            self.offer_hash.read() == hash
+        fn check_offer_hash(self: @ComponentState<TContractState>, offer_hash: felt252) -> bool {
+            self.offer_hash.read() == offer_hash
         }
 
-        fn assert_offer_hash(self: @ComponentState<TContractState>, hash: felt252) {
-            assert(self.check_offer_hash(hash), 'Offer hash does not match');
+        fn assert_offer_hash(self: @ComponentState<TContractState>, offer_hash: felt252) {
+            assert(self.check_offer_hash(offer_hash), 'Offer hash does not match');
         }
 
         fn assert_caller_is_seller(self: @ComponentState<TContractState>) -> ContractAddress {
@@ -232,12 +264,24 @@ mod direct_component {
             seller
         }
 
-        fn assert_hash_and_transfer_goods(
-            ref self: ComponentState<TContractState>, to: ContractAddress, offer_hash: felt252,
+        fn assert_hash_and_transfer<T, +TransferAndTax<T>, +Drop<T>>(
+            ref self: ComponentState<TContractState>,
+            buyer: ContractAddress,
+            offer_hash: felt252,
+            payment: T,
         ) {
             self.assert_running();
             self.assert_offer_hash(offer_hash);
-            self.transfer_goods(to);
+            self.transfer_goods(buyer);
+            payment
+                .transfer_from_and_tax(
+                    buyer, self.seller(), self.tax_ppm.read(), self.beneficiary.read(),
+                );
+            self.manager_dispatcher().set_bought(buyer);
+        }
+
+        fn manager_dispatcher(self: @ComponentState<TContractState>) -> IDirectManagerDispatcher {
+            IDirectManagerDispatcher { contract_address: self.manager.read() }
         }
     }
 }
