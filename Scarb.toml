@@ -11,6 +11,7 @@ sort-module-level-items = true
 
 [dependencies]
 starknet = "2.9.2"
+dojo_beacon = { path = "../../sai/dojo-beacon" }
 dojo = { git = "https://github.com/dojoengine/dojo", tag = "v1.2.1" }
 openzeppelin_token = { git = "https://github.com/OpenZeppelin/cairo-contracts", tag = "v0.20.0" }
 
@@ -21,7 +22,6 @@ dojo_cairo_test = { git = "https://github.com/dojoengine/dojo", tag = "v1.2.1" }
 [[target.starknet-contract]]
 sierra = true
 casm = true
-build-external-contracts = ["dojo::world::world_contract::world"]
 
 
 [profile.sepolia]

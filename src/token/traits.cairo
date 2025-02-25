@@ -1,4 +1,5 @@
 use core::poseidon::poseidon_hash_span;
+use core::dict::Felt252Dict;
 use starknet::{ContractAddress, get_contract_address};
 use openzeppelin_token::{
     erc721::{ERC721ABIDispatcher, ERC721ABIDispatcherTrait},
@@ -6,6 +7,83 @@ use openzeppelin_token::{
 };
 
 use super::{ERC20Amount, ERC721Token, ERC721Tokens, Token, GetEnumValueTrait, StoreGoodsTrait};
+
+trait TokenContractAddressTrait<T> {
+    fn contract_address(self: @T) -> ContractAddress;
+}
+
+impl ERC20AmountContractAddressImpl of TokenContractAddressTrait<ERC20Amount> {
+    fn contract_address(self: @ERC20Amount) -> ContractAddress {
+        *self.contract_address
+    }
+}
+
+impl ERC721TokenContractAddressImpl of TokenContractAddressTrait<ERC721Token> {
+    fn contract_address(self: @ERC721Token) -> ContractAddress {
+        *self.contract_address
+    }
+}
+
+impl ERC721TokensContractAddressImpl of TokenContractAddressTrait<ERC721Tokens> {
+    fn contract_address(self: @ERC721Tokens) -> ContractAddress {
+        *self.contract_address
+    }
+}
+
+impl EnumTokenContractAddressImpl of TokenContractAddressTrait<Token> {
+    fn contract_address(self: @Token) -> ContractAddress {
+        match self {
+            Token::ERC20(token) => token.contract_address(),
+            Token::ERC721(token) => token.contract_address(),
+            Token::ERC721s(tokens) => tokens.contract_address(),
+        }
+    }
+}
+
+trait UniqueTokenTrait<T> {
+    fn are_unique(self: @T) -> bool;
+    fn assert_unique(self: @T) {
+        assert(Self::are_unique(self), 'Not Unique');
+    }
+}
+
+impl ArrayUniqueTokenImpl<T, +TokenContractAddressTrait<T>> of UniqueTokenTrait<Array<T>> {
+    fn are_unique(self: @Array<T>) -> bool {
+        let mut dict: Felt252Dict<bool> = Default::default();
+        let mut tokens = self.span();
+        loop {
+            match tokens.pop_front() {
+                Option::Some(token) => {
+                    let contract_address: felt252 = token.contract_address().into();
+                    if dict.get(contract_address) {
+                        break false;
+                    }
+                    dict.insert(contract_address, true);
+                },
+                Option::None => { break true; },
+            }
+        }
+    }
+}
+
+impl SpanUniqueTokenImpl<T, +TokenContractAddressTrait<T>> of UniqueTokenTrait<Span<T>> {
+    fn are_unique(self: @Span<T>) -> bool {
+        let mut dict: Felt252Dict<bool> = Default::default();
+        let mut tokens = *self;
+        loop {
+            match tokens.pop_front() {
+                Option::Some(token) => {
+                    let contract_address: felt252 = token.contract_address().into();
+                    if dict.get(contract_address) {
+                        break false;
+                    }
+                    dict.insert(contract_address, true);
+                },
+                Option::None => { break true; },
+            }
+        }
+    }
+}
 
 trait DispatcherTrait<T> {
     type Dispatcher;
@@ -52,7 +130,7 @@ fn check_erc721_allowed(
 
 trait TokenTrait<T> {
     fn is_allowed(self: @T, owner: ContractAddress, operator: ContractAddress) -> bool;
-    fn check_allowed(
+    fn assert_allowed(
         self: @T, owner: ContractAddress, operator: ContractAddress,
     ) {
         assert(Self::is_allowed(self, owner, operator), 'Not Allowed');

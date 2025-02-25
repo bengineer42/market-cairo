@@ -1,7 +1,14 @@
 use core::panics::panic_with_byte_array;
 use starknet::ContractAddress;
+
+use super::models::{DIRECT_MULTIPLE_SELECTOR, DIRECT_ONE_OF_SELECTOR, DIRECT_SINGLE_SELECTOR};
+
+fn get_namespace() -> ByteArray {
+    "direct_market"
+}
+
 #[derive(Drop, Copy, Serde, PartialEq, starknet::Store)]
-enum DirectType {
+pub enum DirectType {
     #[default]
     NotDirect,
     Single,
@@ -17,6 +24,15 @@ impl DirectTypeImpl of DirectTypeTrait {
             DirectType::Single => "Direct Single",
             DirectType::Multiple => "Direct Multiple",
             DirectType::OneOf => "Direct One Of",
+        }
+    }
+
+    fn selector(self: @DirectType) -> felt252 {
+        match self {
+            DirectType::NotDirect => panic!("Not a model"),
+            DirectType::Single => DIRECT_SINGLE_SELECTOR,
+            DirectType::Multiple => DIRECT_MULTIPLE_SELECTOR,
+            DirectType::OneOf => DIRECT_ONE_OF_SELECTOR,
         }
     }
 

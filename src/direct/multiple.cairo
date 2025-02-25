@@ -19,87 +19,71 @@ pub fn deploy_direct_multiple(
     deploy_with_double_return(class_hash, salt, calldata.span())
 }
 
-#[starknet::contract]
-mod direct_multiple {
-    use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
-    use market::token::{Token, StoreGoodsTrait, ERC20Amount, TokenTrait, models::ArrayHashImpl};
+#[starknet::component]
+mod direct_multiple_component {
+    use starknet::{ContractAddress, get_caller_address};
+    use market::token::{Token, ERC20Amount, StoreGoodsTrait, models::ArrayHashImpl};
     use market::hash::HashValueTrait;
-    use super::interfaces::{direct_component, IDirectMultiple, IDirectManagerDispatcherTrait};
-    use direct_component::DirectCoreTrait;
-
-    component!(path: direct_component, storage: core, event: DirectEvent);
+    use market::direct::core::{
+        OfferTrait, direct_core_component::{DirectCoreImpl, HasComponent as HasCoreComponent},
+    };
+    use market::direct::interfaces::{IDirectMultiple, IDirectManagerDispatcherTrait};
 
     const ASK_ADDRESS: felt252 = selector!("ask");
 
     #[storage]
     struct Storage {
         ask_hash: felt252,
-        #[substorage(v0)]
-        core: direct_component::Storage,
-    }
-
-    #[event]
-    #[derive(Drop, starknet::Event)]
-    enum Event {
-        DirectEvent: direct_component::Event,
-    }
-
-    #[constructor]
-    fn constructor(
-        ref self: ContractState,
-        seller: ContractAddress,
-        offer: Array<Token>,
-        expiry: u64,
-        beneficiary: ContractAddress,
-        tax_ppm: u32,
-        ask: Array<ERC20Amount>,
-    ) -> (felt252, felt252) {
-        let ask_hash = self.write_ask(ask);
-        let offer_hash = self.core.initializer(seller, offer, expiry, beneficiary, tax_ppm);
-        (offer_hash, ask_hash)
-    }
-
-    #[abi(embed_v0)]
-    impl IDirect = direct_component::DirectImpl<ContractState>;
-
-    #[abi(embed_v0)]
-    impl IDirectMultipleImpl of IDirectMultiple<ContractState> {
-        fn purchase(ref self: ContractState, offer_hash: felt252, ask_hash: felt252) {
-            assert(self.ask_hash.read() == ask_hash, 'Ask hash does not match');
-
-            let caller = get_caller_address();
-            self.core.assert_hash_and_transfer(caller, offer_hash, self.read_ask());
-        }
-
-        fn set_ask(ref self: ContractState, ask: Array<ERC20Amount>) {
-            self.core.assert_caller_is_seller();
-            let ask_span = ask.span();
-            let ask_hash = self.write_ask(ask);
-            self.core.manager_dispatcher().set_multiple_new_ask(ask_span, ask_hash);
-        }
-
-        fn ask_hash(self: @ContractState) -> felt252 {
-            self.ask_hash.read()
-        }
-        fn ask(self: @ContractState) -> Array<ERC20Amount> {
-            self.read_ask()
-        }
-        fn ask_and_hash(self: @ContractState) -> (Array<ERC20Amount>, felt252) {
-            (self.read_ask(), self.ask_hash.read())
-        }
     }
 
     #[generate_trait]
-    impl InternalImpl of InternalTrait {
-        fn read_ask(self: @ContractState) -> Array<ERC20Amount> {
+    impl DirectMultipleInternalImpl<TContractState> of DirectMultipleInternalTrait<TContractState> {
+        fn read_ask(self: @ComponentState<TContractState>) -> Array<ERC20Amount> {
             StoreGoodsTrait::read_goods(ASK_ADDRESS)
         }
 
-        fn write_ask(ref self: ContractState, ask: Array<ERC20Amount>) -> felt252 {
+        fn write_ask(ref self: ComponentState<TContractState>, ask: Array<ERC20Amount>) -> felt252 {
             let ask_hash = ask.hash_value();
             self.ask_hash.write(ask_hash);
             ask.write_goods(ASK_ADDRESS);
             ask_hash
         }
     }
+
+    #[embeddable_as(DirectMultiple)]
+    impl IDirectMultipleImpl<
+        TContractState,
+        impl ICore: HasCoreComponent<TContractState>,
+        impl Offer: OfferTrait<TContractState>,
+        +HasComponent<TContractState>,
+        +Drop<TContractState>,
+    > of IDirectMultiple<ComponentState<TContractState>> {
+        fn purchase(
+            ref self: ComponentState<TContractState>, offer_hash: felt252, ask_hash: felt252,
+        ) {
+            assert(self.ask_hash.read() == ask_hash, 'Ask hash does not match');
+            let mut core = get_dep_component_mut!(ref self, ICore);
+            core.assert_hash_and_take_payment(get_caller_address(), offer_hash, self.read_ask());
+        }
+
+        fn set_ask(ref self: ComponentState<TContractState>, ask: Array<ERC20Amount>) {
+            let mut core = get_dep_component_mut!(ref self, ICore);
+
+            core.assert_caller_is_seller();
+            let ask_span = ask.span();
+            let ask_hash = self.write_ask(ask);
+            core.manager_dispatcher().set_multiple_new_ask(ask_span, ask_hash);
+        }
+
+        fn ask_hash(self: @ComponentState<TContractState>) -> felt252 {
+            self.ask_hash.read()
+        }
+        fn ask(self: @ComponentState<TContractState>) -> Array<ERC20Amount> {
+            self.read_ask()
+        }
+        fn ask_and_hash(self: @ComponentState<TContractState>) -> (Array<ERC20Amount>, felt252) {
+            (self.read_ask(), self.ask_hash.read())
+        }
+    }
 }
+

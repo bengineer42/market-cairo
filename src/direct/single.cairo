@@ -26,69 +26,62 @@ pub fn deploy_direct_single(
     deploy_with_single_return(class_hash, salt, calldata.span())
 }
 
-#[starknet::contract]
-mod direct_single {
-    use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
+#[starknet::component]
+mod direct_single_component {
+    use starknet::{ContractAddress, get_caller_address};
     use market::token::Token;
-    use super::interfaces::{direct_component, IDirectSingle};
-    use direct_component::DirectCoreTrait;
-    component!(path: direct_component, storage: core, event: DirectEvent);
+
+    use market::direct::core::{
+        OfferTrait, direct_core_component::{DirectCoreImpl, HasComponent as HasCoreComponent},
+    };
+    use market::direct::interfaces::{IDirectSingle, IDirectManagerDispatcherTrait};
 
     #[storage]
     struct Storage {
         erc20_address: ContractAddress,
         price: u256,
-        #[substorage(v0)]
-        core: direct_component::Storage,
     }
 
-    #[event]
-    #[derive(Drop, starknet::Event)]
-    enum Event {
-        DirectEvent: direct_component::Event,
-    }
-
-    #[constructor]
-    fn constructor(
-        ref self: ContractState,
-        seller: ContractAddress,
-        offer: Array<Token>,
-        expiry: u64,
-        beneficiary: ContractAddress,
-        tax_ppm: u32,
-        erc20_address: ContractAddress,
-        price: u256,
-    ) -> felt252 {
-        self.erc20_address.write(erc20_address);
-        self.price.write(price);
-        self.core.initializer(seller, offer, expiry, beneficiary, tax_ppm)
-    }
-
-    #[abi(embed_v0)]
-    impl IDirect = direct_component::DirectImpl<ContractState>;
-
-    #[abi(embed_v0)]
-    impl IDirectSingleImpl of IDirectSingle<ContractState> {
-        fn purchase(ref self: ContractState, offer_hash: felt252, price: u256) {
-            assert(price == self.price.read(), 'Price does not match');
-
-            let caller = get_caller_address();
-            self
-                .core
-                .assert_hash_and_transfer(caller, offer_hash, (self.erc20_address.read(), price));
-        }
-
-        fn set_price(ref self: ContractState, price: u256) {
-            self.core.assert_open();
-            self.core.assert_caller_is_seller();
+    #[generate_trait]
+    impl DirectSingleInternalImpl<TContractState> of DirectSingleInternalTrait<TContractState> {
+        fn set_price_and_token_address(
+            ref self: ComponentState<TContractState>, erc20_address: ContractAddress, price: u256,
+        ) {
+            self.erc20_address.write(erc20_address);
             self.price.write(price);
         }
+    }
 
-        fn price(self: @ContractState) -> u256 {
+    #[embeddable_as(DirectSingle)]
+    impl IDirectSingleImpl<
+        TContractState,
+        impl ICore: HasCoreComponent<TContractState>,
+        impl Offer: OfferTrait<TContractState>,
+        +HasComponent<TContractState>,
+        +Drop<TContractState>,
+    > of IDirectSingle<ComponentState<TContractState>> {
+        fn purchase(ref self: ComponentState<TContractState>, offer_hash: felt252, price: u256) {
+            assert(price == self.price.read(), 'Price does not match');
+
+            let mut core = get_dep_component_mut!(ref self, ICore);
+            core
+                .assert_hash_and_take_payment(
+                    get_caller_address(), offer_hash, (self.erc20_address.read(), price),
+                );
+        }
+
+        fn set_price(ref self: ComponentState<TContractState>, price: u256) {
+            let mut core = get_dep_component_mut!(ref self, ICore);
+            core.assert_caller_is_seller();
+            self.price.write(price);
+            core.manager_dispatcher().set_single_new_price(price);
+        }
+
+        fn price(self: @ComponentState<TContractState>) -> u256 {
             self.price.read()
         }
 
-        fn erc20_address(self: @ContractState) -> ContractAddress {
+        fn erc20_address(self: @ComponentState<TContractState>) -> ContractAddress {
             self.erc20_address.read()
         }
     }

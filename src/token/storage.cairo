@@ -10,12 +10,12 @@ use super::{Token, ERC20Amount, ERC721Token, ERC721Tokens, GetEnumValueTrait};
 
 trait StoreTokenTrait<T> {
     fn read_token(base_address: StorageBaseAddress, offset: u8) -> T;
-    fn write_token(self: T, base_address: StorageBaseAddress, offset: u8);
+    fn write_token(self: @T, base_address: StorageBaseAddress, offset: u8);
 }
 
 trait StoreGoodsTrait<T> {
     fn read_goods(address: felt252) -> T;
-    fn write_goods(self: T, address: felt252);
+    fn write_goods(self: @T, address: felt252);
 }
 
 fn read_contract_address_u256(
@@ -40,8 +40,8 @@ impl ERC20AmountStoreImpl of StoreTokenTrait<ERC20Amount> {
         let (contract_address, amount) = read_contract_address_u256(base_address, offset);
         ERC20Amount { contract_address, amount }
     }
-    fn write_token(self: ERC20Amount, base_address: StorageBaseAddress, offset: u8) {
-        write_contract_address_u256(base_address, offset, self.contract_address, self.amount);
+    fn write_token(self: @ERC20Amount, base_address: StorageBaseAddress, offset: u8) {
+        write_contract_address_u256(base_address, offset, *self.contract_address, *self.amount);
     }
 }
 
@@ -50,8 +50,8 @@ impl ERC721TokenStoreImpl of StoreTokenTrait<ERC721Token> {
         let (contract_address, token_id) = read_contract_address_u256(base_address, offset);
         ERC721Token { contract_address, token_id }
     }
-    fn write_token(self: ERC721Token, base_address: StorageBaseAddress, offset: u8) {
-        write_contract_address_u256(base_address, offset, self.contract_address, self.token_id);
+    fn write_token(self: @ERC721Token, base_address: StorageBaseAddress, offset: u8) {
+        write_contract_address_u256(base_address, offset, *self.contract_address, *self.token_id);
     }
 }
 
@@ -71,15 +71,16 @@ impl ERC721TokensStoreImpl of StoreTokenTrait<ERC721Tokens> {
         ERC721Tokens { contract_address, token_ids }
     }
 
-    fn write_token(mut self: ERC721Tokens, base_address: StorageBaseAddress, offset: u8) {
-        storage_write_value_from_base_offset(base_address, offset, self.contract_address);
+    fn write_token(mut self: @ERC721Tokens, base_address: StorageBaseAddress, offset: u8) {
+        storage_write_value_from_base_offset(base_address, offset, *self.contract_address);
         storage_write_value_from_base_offset(base_address, offset + 1, self.token_ids.len());
         let mut n = offset + 2;
+        let mut token_ids = self.token_ids.span();
         loop {
-            match self.token_ids.pop_front() {
+            match token_ids.pop_front() {
                 Option::Some(token_id) => {
-                    storage_write_value_from_base_offset(base_address, n, token_id.low);
-                    storage_write_value_from_base_offset(base_address, n + 1, token_id.high);
+                    storage_write_value_from_base_offset(base_address, n, *token_id.low);
+                    storage_write_value_from_base_offset(base_address, n + 1, *token_id.high);
                     n += 2;
                 },
                 Option::None => { break; },
@@ -99,7 +100,7 @@ impl TokenEnumStoreImpl of StoreTokenTrait<Token> {
         }
     }
 
-    fn write_token(self: Token, base_address: StorageBaseAddress, offset: u8) {
+    fn write_token(self: @Token, base_address: StorageBaseAddress, offset: u8) {
         storage_write_value_from_base_offset(base_address, 0, self.get_enum_value());
         match self {
             Token::ERC20(token) => token.write_token(base_address, offset + 1),
@@ -126,11 +127,12 @@ impl StoreArrayTokenImpl<T, +StoreTokenTrait<T>, +Drop<T>> of StoreGoodsTrait<Ar
         tokens
     }
 
-    fn write_goods(mut self: Array<T>, address: felt252) {
+    fn write_goods(mut self: @Array<T>, address: felt252) {
         storage_write_value(address.try_into().unwrap(), self.len());
         let mut n = 0;
+        let mut array = self.span();
         loop {
-            match self.pop_front() {
+            match array.pop_front() {
                 Option::Some(token) => {
                     StoreTokenTrait::write_token(
                         token,
@@ -177,4 +179,5 @@ impl StoreArrayTokenImpl<T, +StoreTokenTrait<T>, +Drop<T>> of StoreGoodsTrait<Ar
 //         }
 //     }
 // }
+
 

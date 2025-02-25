@@ -1,10 +1,13 @@
 {
   "dependencies": {
-    "dotenv": "^16.4.5",
+    "argparse": "^2.0.1",
+    "dotenv": "^16.4.7",
     "jq": "^1.7.2",
     "requirejs": "^2.3.7",
-    "starknet": "6.11",
-    "toml": "^3.0.0"
+    "starknet": "^6.23.1",
+    "toml": "^3.0.0",
+    "typescript": "^5.7.3"
   },
-  "type": "module"
+  "type": "module",
+  "version": "1.0.0"
 }
