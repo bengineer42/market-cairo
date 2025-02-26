@@ -6,9 +6,7 @@ mod direct_manager {
         StoragePointerWriteAccess,
     };
 
-    use dojo::world::WorldStorage;
     use dojo_beacon::resource_component;
-    use dojo_beacon::model::namespace;
 
     use market::token::{Token, ERC20Amount, TokenTrait};
     use market::direct::{
