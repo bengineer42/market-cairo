@@ -197,7 +197,7 @@ trait IDirectCore<TContractState> {
     /// Gets the offer and hash.
     fn offer_and_hash(self: @TContractState) -> (Array<Token>, felt252);
 
-    /// Verifies the offer.
+    /// Verifies the offer is owned and transferable.
     fn verify_offer(self: @TContractState) -> bool;
 }
 
